@@ -1,0 +1,242 @@
+---
+title: "MTH6139 Time Series" 
+subtitle: "Coursework 1 Gold Prices" 
+author: "Shaivi Darsi" 
+date: "Spring term 2025" 
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: spacelab 
+    highlight: tango
+---
+ 
+```{r, echo=FALSE}
+# This code will display the QMUL logo at the top right of the page
+# Do not change this code
+htmltools::img(src = knitr::image_uri("images/QMlogo.png"),
+               alt = 'logo',
+               style = 'position:absolute; top:0; right:0; padding:10px; width:20%;')
+```
+# 1. Introduction
+
+This project analyses historical daily gold prices from 1970 to 2026 and applies the Prophet model to forecast future values. Gold is widely considered a safe-haven asset, which means its price increases during periods of economic uncertainty.
+
+The aim of this project is to explore trends in gold prices, build a forecasting model, evaluate the importance of seasonality, and compare forecasts using recent data.
+
+---
+
+# 2. Data Preparation
+
+## 2.1 Loading the data
+
+```{r}
+gold_data <- read.csv("data/gold_price_1970_2026_daily.csv", stringsAsFactors = FALSE)
+str(gold_data)
+head(gold_data)
+```
+
+The dataset contains daily gold prices recorded from 1970 to 2026. In this project, we focus on the closing price. For further analysis we can also look at the open, high and low prices in this datset.
+
+---
+
+## 2.2 Cleaning column names
+
+```{r}
+names(gold_data) <- trimws(names(gold_data))
+names(gold_data) <- tolower(names(gold_data))
+```
+
+Column names are cleaned to remove spaces and capital letters to ensure consistency.
+
+---
+
+## 2.3 Converting dates
+
+```{r}
+library(lubridate)
+gold_data$date <- mdy(gold_data$date)
+gold_data <- gold_data[!is.na(gold_data$date), ]
+```
+
+The date column is converted into a proper date format that prophet can understand as this datset's date format is slightly different. The missing values are removed as well.
+
+---
+
+## 2.4 Preparing data for Prophet
+
+```{r}
+prophet_data <- data.frame(
+  ds = gold_data$date,
+  y = gold_data$close
+)
+```
+
+Prophet requires a dataframe with:
+
+* `ds`: date column which is the daily date the price is recorded
+* `y`: variable to forecast which is the closing price
+
+---
+
+# 3. Exploratory Analysis
+
+```{r}
+plot(prophet_data$ds, prophet_data$y, type = "l",
+     main = "Gold Prices Over Time",
+     xlab = "Year", ylab = "Price")
+```
+
+The plot shows a clear long term upward trend in gold prices. There are periods of volatility and sharper increases, particularly after the early 2000s, which indicates changing market conditions.
+
+---
+
+# 4. Model Building
+
+## 4.1 Log transformation
+
+```{r}
+prophet_data$y <- log(prophet_data$y)
+```
+
+A logarithmic transformation is applied here to stabilise variance and capture growth patterns better.
+
+---
+
+## 4.2 Fitting the model
+
+```{r}
+library(prophet)
+gold_model <- prophet(prophet_data)
+```
+
+The Prophet model is fitted using the log transformed data. Important to note it shows log transformed gold prices and not actual prices.
+
+---
+
+## 4.3 Forecasting
+
+```{r}
+future_dates <- make_future_dataframe(gold_model, periods = 365)
+gold_forecast <- predict(gold_model, future_dates)
+```
+
+The model forecasts gold prices one year into the future(1 year is 365 days)
+
+---
+
+# 5. Results
+
+## 5.1 Forecast plot
+
+```{r}
+plot(gold_model, gold_forecast)
+```
+
+This plot shows historical log-transformed prices along with the forecast. The blue line represents predicted values, while the shaded region represents uncertainty intervals. The forecast indicates continued upward growth with increasing uncertainty over time.
+
+---
+
+## 5.2 Model components
+
+```{r}
+prophet_plot_components(gold_model, gold_forecast)
+```
+
+The components plot breaks the forecast into trend and seasonal effects:
+
+* The **Trend (Top) component** shows long-term movement of gold prices (log scale): 
+    *X-axis shows the time
+    *Y-axis shows the trend value
+    *Observed:
+        *Strong upward trend from 1970 to 2025
+        *Slight flattening around 1980 to 2000
+        *Faster growth after 2000
+* The **Weekly (Middle) component** shows the effect of day of the week on prices
+    *X-axis shows the days
+    *Y-axis shows the small effect on price
+    *Observed:
+        *Slight dip on Monday
+        *Increase towards weekend (Saturday highest)
+        *Day of week has little impact on gold prices
+* The **Yearly (Bottom) component** shows the effect of time of year
+    *X-axis shows the day of year (can look at the year in quarters for better understanding)
+    *Y-axis shows the seasonal effect
+    *Observed:
+    *Peaks around the middle of the year
+    *Dips towards the end and start of the year
+    *Some seasonal pattern but relatively small compared to the the trend.
+
+All components are in log scale, so seasonal effects represent proportional changes rather than absolute price differences
+Overall, the trend is the dominant factor driving gold prices.
+
+---
+
+## 5.3 Converting back to original scale
+
+```{r}
+tail(gold_forecast[, c("ds", "yhat", "yhat_lower", "yhat_upper")])
+
+gold_forecast$price <- exp(gold_forecast$yhat)
+gold_forecast$price_lower <- exp(gold_forecast$yhat_lower)
+gold_forecast$price_upper <- exp(gold_forecast$yhat_upper)
+
+tail(gold_forecast[, c("ds", "price", "price_lower", "price_upper")])
+```
+
+Since the model was fitted on log transformed data, predictions are converted back to actual prices using the exponential function. This provides interpretable forecasts along with uncertainty ranges.
+
+---
+
+# 6. Model Comparisons
+
+## 6.1 Model without seasonality
+
+```{r}
+model_no_season <- prophet(prophet_data, yearly.seasonality = FALSE)
+
+future2 <- make_future_dataframe(model_no_season, periods = 365)
+forecast2 <- predict(model_no_season, future2)
+
+plot(model_no_season, forecast2)
+```
+
+This model removes yearly seasonality to test its importance. The forecast remains largely unchanged, indicating that seasonal effects have minimal influence on gold prices.
+The graph looks very similar to the 1st grapgh of the closing gold prices
+
+---
+
+## 6.2 Model using recent data (from 2000)
+
+```{r}
+recent_data <- prophet_data[prophet_data$ds > as.Date("2000-01-01"), ]
+
+recent_model <- prophet(recent_data)
+
+future_recent <- make_future_dataframe(recent_model, periods = 365)
+forecast_recent <- predict(recent_model, future_recent)
+
+plot(recent_model, forecast_recent)
+```
+
+This model uses only recent data to focus on modern market behaviour and understaning it. The forecast typically shows a steeper upward trend, reflecting stronger growth in recent years. This suggests that recent data may provide more relevant short term predictions.
+
+---
+
+# 7. Key Insights
+
+* Gold prices exhibit a strong long term upward trend
+* Growth accelerates significantly after the early 2000s
+* There are periods of high volatility linked to economic events
+* Seasonal effects are weak and do not significantly impact prices
+* Forecasts indicate continued growth with increasing uncertainty
+* Models based on recent data provide more realistic short term forecasts
+
+---
+
+# 8. Conclusion
+
+This project shows us the application of Prophet for time series forecasting of gold prices. The results show that gold prices are primarily driven by long term trends rather than seasonal effects. While the model predicts continued growth, uncertainty increases over longer forecast timelines. Using recent data highlights stronger modern trends and provides more relevant forecasts for current market conditions.
+
+# 9. Data Sources and further research
+Data downloaded from Kaggle in csv format.The prices in this dataset are in USD ($). Further analysis can be done on the open prices and high and low prices recorded daily. 
